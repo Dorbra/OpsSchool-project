@@ -1,0 +1,102 @@
+pipeline{
+    agent {label 'linux'}
+    parameters {
+        choice(name: 'deploy', choices: ['enabled', 'disabled'], description: 'deploy docker?' )
+        string(defaultValue: '0', description: 'Build Versioning', name: 'VERSION')
+    }
+    stages{
+        stage("Deploy?"){
+            when {
+                expression { params.deploy == "enabled" }
+            }
+            stages{
+                stage("Git Clone"){
+                    steps{
+                        git branch: 'master', credentialsId: 'github-jenkins', url: 'https://github.com/Dorbra/kandula-project-app'
+                    }
+                }
+                stage("Docker build&push") {
+                    steps{
+                        dir(""){
+                            script{
+                                withDockerRegistry(credentialsId: 'dockerhub-dorbra') {
+                                    def image = docker.build("dorbra/kandula-midproject:${VERSION}")
+                                    image.push()
+                                }
+                            }
+                        }
+                    }
+                }
+                stage("Create K8s deployment file") {
+                    steps{
+                    withCredentials([string(credentialsId: 'aws.access_key', variable: 'AWS_ACCESS_KEY_ID'), string(credentialsId: 'aws.secret_key', variable: 'AWS_SECRET_ACCESS_KEY'), string(credentialsId: 'aws.region', variable: 'AWS_DEFAULT_REGION')]) {
+                        script {
+            dep = sh """
+                    tee dep.yaml <<-'EOF'
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: kandula-app-deployment
+                      annotations:
+                        kubernetes.io/change-cause: "First deploy of Kandula app"
+                    spec:
+                      replicas: 1
+                      selector:
+                        matchLabels:
+                          app: kandula-app
+                      template:
+                        metadata:
+                          labels:
+                            app: kandula-app
+                        spec:
+                          containers:
+                            - name: kandula-midproject
+                              image: dorbra/kandula-midproject
+                              env:
+                                - name: FLASK_ENV
+                                  value: "development"
+                                - name: AWS_ACCESS_KEY_ID
+                                  value: "${AWS_ACCESS_KEY_ID}"
+                                - name: AWS_SECRET_ACCESS_KEY
+                                  value: "${AWS_SECRET_ACCESS_KEY}"
+                                - name: AWS_DEFAULT_REGION
+                                  value: "${AWS_DEFAULT_REGION}"
+                              ports:
+                                - containerPort: 5000
+                                  name: http
+                                  protocol: TCP
+                """
+    }}}
+                }
+    stage('Create K8s Service file') {
+        steps {
+            script {
+        svc = sh """
+                tee svc.yaml <<-'EOF'
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: kandula-app-service
+                spec:
+                  selector:
+                    app: kandula-app
+                  type: LoadBalancer
+                  ports:
+                    - name: http
+                      port: 80
+                      targetPort: 5000
+                      protocol: TCP
+                """
+    }}}
+    stage ('K8S Deploy Application') {
+        steps {
+      sh 'kubectl apply -f dep.yaml'
+    }}
+    stage ('K8S Deploy Service') {
+        steps {
+      sh 'kubectl apply -f svc.yaml'
+    }}
+}
+}
+}
+}

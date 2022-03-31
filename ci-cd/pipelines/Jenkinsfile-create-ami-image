@@ -1,0 +1,43 @@
+pipeline {
+    agent { label 'linux'}
+    stages {
+        stage('get-volume-id') {
+            steps {
+                script{
+                    vol_id = sh returnStdout: true, script: '''aws ec2 describe-instances \\
+                    --region us-east-1 \\
+                    --filters "Name=tag:Name,Values=Jenkins Server" \\
+                    "Name=instance-state-name,Values=running"  \\
+                    --query \'Reservations[*].Instances[*].BlockDeviceMappings[*].Ebs.VolumeId\' \\
+                    --output text'''
+                    echo "${vol_id}"
+                }
+            }
+        }
+        stage('create-snapshot') {
+            steps {
+                script {
+                    snapshot_id = sh returnStdout: true, script: "aws ec2 --region us-east-1 create-snapshot  --query  \'SnapshotId\' --output text --volume-id ${vol_id}"
+                    echo "${snapshot_id}"
+                }
+            }
+        }
+            stage('create-ami') {
+            steps {
+                script {
+                    old_ami = sh returnStdout: true, script: "aws ec2 describe-images --region us-east-1 --filters 'Name=name,Values=jenkins-ami-latest' --query Images[*].ImageId --output text"
+                    sh "aws ec2 deregister-image --region us-east-1 --image-id ${old_ami}"
+                    echo "${old_ami}"
+                    
+                    snapshot_status = ""
+                    while(!snapshot_status.contains('100')){
+                        snapshot_status = sh returnStdout: true, script: "aws ec2 describe-snapshots --region us-east-1 --query 'Snapshots[*].Progress' --output text --snapshot-ids ${snapshot_id}"
+                        echo "${snapshot_status}"
+                    }
+                    cmd = "aws ec2 register-image --name \'jenkins-ami-latest\' --region=us-east-1 --architecture x86_64 --description \'AMI_from_snapshot_EBS\' --block-device-mappings DeviceName=\'/dev/sda1\',Ebs={SnapshotId='${snapshot_id}'} --root-device-name \'/dev/sda1\'"
+                    sh "${cmd}"
+                }
+            }
+        }
+    }
+}
