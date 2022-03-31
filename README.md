@@ -13,7 +13,7 @@ Infrastructure is deployed using Terraform on AWS:
 * ALB targeting & exposing all services
 * EKS-Kubernetes cluster:
   - 2 groups / 2 nodes each.
-  - deployment of 'Kandula' web-app, running on ELB - using Flask listening on port 5000: https://github.com/Dorbra/kandula-project-app
+  - deployment of 'Kandula' web-app, running on ELB - using Flask listening on port 5000: https://github.com/Dorbra/Kandula-ops
 
 **Installation & Usage**
 
